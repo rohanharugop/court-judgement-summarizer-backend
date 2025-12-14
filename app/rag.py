@@ -1,55 +1,47 @@
-import json
-import pickle
 import os
-import faiss
-from sentence_transformers import SentenceTransformer
-from groq import Groq
 from dotenv import load_dotenv
+from sentence_transformers import SentenceTransformer
+from pinecone import Pinecone
+from groq import Groq
 
+# Load env vars
+load_dotenv()
 
-from pathlib import Path
+# Pinecone config
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+PINECONE_INDEX = os.getenv("PINECONE_INDEX")
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(dotenv_path=BASE_DIR / ".env")
+# Groq config
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+MODEL_NAME = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
+# Init Pinecone
+pc = Pinecone(api_key=PINECONE_API_KEY)
+index = pc.Index(PINECONE_INDEX)
 
-
-
-# Load models ONCE
+# Embedding model (small & fast)
 embedding_model = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-MODEL_NAME = "llama-3.3-70b-versatile"
 
-# Load vector store
-index = faiss.read_index(str(BASE_DIR / "vector-store" / "faiss.index"))
-
-with open(BASE_DIR / "vector-store" / "metadata.pkl", "rb") as f:
-    metadata = pickle.load(f)
-
-with open(BASE_DIR / "processed-data" / "judgment_chunks.json", "r", encoding="utf-8") as f:
-    chunks = json.load(f)
-
-texts = [c["text"] for c in chunks]
-
-
-import re
-
-
-
+# Groq client
+client = Groq(api_key=GROQ_API_KEY)
 
 
 def retrieve_precedents(query: str, top_k: int = 5):
-    query_embedding = embedding_model.encode([query], convert_to_numpy=True)
-    distances, indices = index.search(query_embedding, top_k)
+    query_embedding = embedding_model.encode(query).tolist()
 
-    results = []
-    for idx in indices[0]:
-        results.append({
-            "case_name": metadata[idx]["case_name"],
-            "excerpt": texts[idx][:500]
-        })
+    response = index.query(
+        vector=query_embedding,
+        top_k=top_k,
+        include_metadata=True
+    )
 
-    return results
+    return [
+        {
+            "case_name": match["metadata"]["case_name"],
+            "excerpt": match["metadata"]["text"][:500]
+        }
+        for match in response["matches"]
+    ]
 
 
 def build_prompt(query, precedents):
@@ -61,33 +53,24 @@ def build_prompt(query, precedents):
     return f"""
 You are LexBrief AI, an intelligent legal research assistant.
 
-Step 1 — Analyze the user's query:
-- Determine the user's intent and sentiment (e.g., greeting, curiosity, confusion, academic interest).
-- Do NOT explicitly mention sentiment labels in the final answer.
+Step 1 — Analyze the user's intent and sentiment.
+Adapt your tone accordingly.
+
+Step 2 — Using the provided excerpts, explain the legal relevance
+of each judgment to the user's query.
 
 User Query:
 "{query}"
 
-Step 2 — Response strategy:
-- If the query expresses confusion or uncertainty, respond in a calm, explanatory tone.
-- If the query is purely informational, respond concisely and formally.
-- If the query is a case name or precedent, explain its legal relevance.
-- If the query is vague, politely guide the user toward a clearer legal question.
-
-Step 3 — Legal reasoning:
-Using the excerpts below, explain why each judgment is relevant to the query.
-Focus on legal principles, constitutional interpretation, and precedent value.
-
-Relevant court judgment excerpts:
+Relevant judgment excerpts:
 {context}
 
 Rules:
-- Do NOT provide legal advice.
-- Do NOT invent facts.
-- Do NOT mention internal reasoning steps.
-- Maintain a professional but approachable tone.
+- Do NOT give legal advice
+- Do NOT hallucinate facts
+- Ask for clarification if the query is vague
+- Use professional legal language
 """
-
 
 
 def generate_explanation(query, precedents):
@@ -96,7 +79,8 @@ def generate_explanation(query, precedents):
     response = client.chat.completions.create(
         model=MODEL_NAME,
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.2
+        temperature=0.2,
+        timeout=30
     )
 
     return response.choices[0].message.content

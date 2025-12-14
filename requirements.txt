@@ -5,3 +5,5 @@ sentence-transformers
 python-dotenv
 groq
 pydantic
+pinecone-client
+
