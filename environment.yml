@@ -1,0 +1,66 @@
+name: legal-rag-ai
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  # Core
+  - python=3.10
+  - pip
+  - numpy
+  - pandas
+  - scikit-learn
+
+  # PDF & OCR
+  - poppler
+  - tesseract
+  - pillow
+
+  # Backend
+  - fastapi
+  - uvicorn
+
+  # FAISS (CPU)
+  - faiss-cpu
+
+  # Utilities
+  - python-dotenv
+  - tqdm
+
+  # Pip-only packages
+  - pip:
+      # RAG frameworks
+      - langchain
+      - langchain-community
+      - llama-index
+
+      # Embeddings
+      - sentence-transformers
+
+      # LLM APIs
+      - openai
+      - groq
+
+      # PDF parsing
+      - pdfplumber
+      - pymupdf
+
+      # OCR helpers
+      - pytesseract
+
+      # Tokenizers
+      - tiktoken
+
+      # Text processing
+      - nltk
+      - spacy
+
+      # Vector DB (optional alternatives)
+      - chromadb
+      - weaviate-client
+
+      # Evaluation
+      - rouge-score
+
+      # Logging
+      - loguru
